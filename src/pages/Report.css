@@ -1,13 +1,13 @@
 @media (min-width: 1024px) {
     .container-reports {
         position: relative;
-        left: 185px;
-        width: 92%;
+        left: 245px;
+        width: 110vw;
         min-height: 100vh;
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
+        justify-content: flex-start;
         padding: 2rem 0;
     }
     .container-header-reports {

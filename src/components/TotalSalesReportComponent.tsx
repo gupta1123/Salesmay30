@@ -65,10 +65,10 @@ const TotalSalesReportComponent: React.FC = () => {
   // State
   const [stores, setStores] = useState<Store[]>([]);
   const [isLoadingStores, setIsLoadingStores] = useState(false);
-  const [summaryStoreId, setSummaryStoreId] = useState<string>('');
   const [summaryStartDate, setSummaryStartDate] = useState<Date | undefined>(subDays(new Date(), 7));
   const [summaryEndDate, setSummaryEndDate] = useState<Date | undefined>(new Date());
-  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
+  // State to hold the aggregated total tons
+  const [aggregatedTotalTons, setAggregatedTotalTons] = useState<number | null>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState<boolean>(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   // Add state for dynamic chart data
@@ -126,17 +126,28 @@ const TotalSalesReportComponent: React.FC = () => {
   }, [token]);
 
   // Fetch Sales Summary Data (Update BAR chart data on success)
-  const fetchSalesSummary = async (storeId: string, startDate: Date, endDate: Date) => {
-    if (!token || !storeId || !startDate || !endDate) return;
+  const fetchSalesSummary = async (startDate: Date, endDate: Date) => {
+    if (!token || !startDate || !endDate) return;
     setIsSummaryLoading(true);
     setSummaryError(null);
-    setSummaryData(null);
+    // setSummaryData(null); // No longer using summaryData state for this component display
+    setAggregatedTotalTons(null);
     setChartDisplayData(initialChartData); // Reset chart on new fetch
 
     const formattedStartDate = format(startDate, 'yyyy-MM-dd');
     const formattedEndDate = format(endDate, 'yyyy-MM-dd');
+
+    // Construct query parameters for the endpoint (without storeId)
+    const params = new URLSearchParams();
+    params.append('startDate', formattedStartDate);
+    params.append('endDate', formattedEndDate);
+    // params.append('storeId', storeId); // Removed storeId
+    params.append('page', '0'); // Request first page
+    params.append('size', '1000'); // Request a large size to get all stores (adjust if needed)
+
+    const url = `https://api.gajkesaristeels.in/sales/totalTons?${params.toString()}`;
+
     try {
-      const url = `https://api.gajkesaristeels.in/sales/totalTonsByStore?storeId=${storeId}&startDate=${formattedStartDate}&endDate=${formattedEndDate}`;
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -148,24 +159,34 @@ const TotalSalesReportComponent: React.FC = () => {
         } catch (e) { /* Ignore */ }
         throw new Error(errorMsg);
       }
-      const data: SummaryData = await response.json();
-      setSummaryData(data);
+      const data = await response.json();
 
-      // Update BAR chart data with fetched total
-      setChartDisplayData({
-        labels: [data.storeName], // Use store name as the label for the bar
-        datasets: [
-          {
-            ...initialChartData.datasets[0], // Keep styling
-            label: 'Total Tons',
-            data: [data.totalTons], // Single data point for the bar
-          },
-        ],
-      });
+      // Check if content exists and has at least one item
+      if (data.content && data.content.length > 0) {
+          // Aggregate total tons from all stores in the response
+          const total = data.content.reduce((sum: number, item: SummaryData) => sum + item.totalTons, 0);
+          setAggregatedTotalTons(total);
+
+          // Update BAR chart data with aggregated total
+          setChartDisplayData({
+            labels: ['All Stores'], // Use a generic label
+            datasets: [
+              {
+                ...initialChartData.datasets[0], // Keep styling
+                label: 'Total Tons',
+                data: [total], // Aggregated total
+              },
+            ],
+          });
+      } else {
+          setAggregatedTotalTons(0); // Set to 0 if no content
+          setChartDisplayData(initialChartData); // Reset chart
+      }
 
     } catch (error: any) {
       console.error('Error fetching sales summary:', error);
       setSummaryError(error.message || 'Failed to load sales summary.');
+      setAggregatedTotalTons(null);
       setChartDisplayData(initialChartData); // Reset chart on error
     } finally {
       setIsSummaryLoading(false);
@@ -179,19 +200,21 @@ const TotalSalesReportComponent: React.FC = () => {
   };
 
   const handleApplyFilters = () => {
-    if (summaryStoreId && summaryStartDate && summaryEndDate) {
-      fetchSalesSummary(summaryStoreId, summaryStartDate, summaryEndDate);
+    if (summaryStartDate && summaryEndDate) {
+      fetchSalesSummary(summaryStartDate, summaryEndDate);
     } else {
-      setSummaryError("Please select a store, start date, and end date.");
-      setSummaryData(null);
+      setSummaryError("Please select a start date and end date.");
+      // setSummaryData(null);
+      setAggregatedTotalTons(null);
     }
   };
 
   const handleClearFilters = () => {
-    setSummaryStoreId('');
+    // setSummaryStoreId(''); // Removed
     setSummaryStartDate(subDays(new Date(), 7));
     setSummaryEndDate(new Date());
-    setSummaryData(null);
+    // setSummaryData(null);
+    setAggregatedTotalTons(null);
     setSummaryError(null);
     setChartDisplayData(initialChartData); // Reset chart on clear
   };
@@ -205,9 +228,10 @@ const TotalSalesReportComponent: React.FC = () => {
         {/* Filters */}
         <div className="p-4 border rounded-md bg-gradient-to-b from-[var(--gajkesari-black)] to-[var(--gajkesari-gray)]">
              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                {/* Store Filter */}
+                {/* Store Filter - Removed */}
+                {/*
                 <div className="space-y-1">
-                   <Label htmlFor="report-storeId" className="text-gray-200">Store</Label> {/* Updated ID for uniqueness */}
+                   <Label htmlFor="report-storeId" className="text-gray-200">Store</Label> 
                    <Select value={summaryStoreId} onValueChange={setSummaryStoreId}>
                        <SelectTrigger id="report-storeId">
                            <SelectValue placeholder={isLoadingStores ? "Loading..." : "Select Store"} />
@@ -221,8 +245,9 @@ const TotalSalesReportComponent: React.FC = () => {
                        </SelectContent>
                    </Select>
                 </div>
+                */}
                 {/* Start Date Filter */}
-                <div className="space-y-1">
+                <div className="space-y-1 md:col-start-1"> {/* Adjust grid positioning */}
                     <Label htmlFor="report-startDate" className="text-gray-200">Start Date</Label> {/* Updated ID */}
                     <Popover>
                         <PopoverTrigger asChild>
@@ -274,10 +299,10 @@ const TotalSalesReportComponent: React.FC = () => {
                     </Popover>
                 </div>
                  {/* Apply/Clear Buttons - Adjusted flex direction for responsiveness */}
-                <div className="flex flex-col md:flex-col gap-2 md:col-span-1"> {/* Changed sm:flex-row to md:flex-col */}
+                <div className="flex flex-col md:flex-col gap-2 md:col-span-1">
                    <Button
                        onClick={handleApplyFilters}
-                       disabled={isSummaryLoading || !summaryStoreId || !summaryStartDate || !summaryEndDate}
+                       disabled={isSummaryLoading || !summaryStartDate || !summaryEndDate} // Removed storeId check
                        className="w-full"
                    >
                        {isSummaryLoading ? <Loader className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -306,24 +331,20 @@ const TotalSalesReportComponent: React.FC = () => {
                      <p className="text-lg font-semibold">Error Loading Summary</p>
                      <p>{summaryError}</p>
                  </div>
-             ) : summaryData ? (
+             ) : aggregatedTotalTons !== null ? ( // Check if aggregated total is available
                  <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300 border border-[var(--gajkesari-red)]">
                      <CardHeader className="text-center bg-gradient-to-r from-[var(--gajkesari-black)] to-[var(--gajkesari-dark-red)] text-white rounded-t-lg py-4">
-                         <CardTitle className="text-2xl">{summaryData.storeName}</CardTitle>
+                         <CardTitle className="text-2xl">Total Sales Summary</CardTitle> {/* Generic Title */} 
                          <CardDescription className="text-[var(--gajkesari-dark-red)] font-semibold">
-                             Sales Summary ({summaryStartDate ? format(summaryStartDate, "MMM d, yyyy") : ''} - {summaryEndDate ? format(summaryEndDate, "MMM d, yyyy") : ''})
+                             ({summaryStartDate ? format(summaryStartDate, "MMM d, yyyy") : ''} - {summaryEndDate ? format(summaryEndDate, "MMM d, yyyy") : ''})
                          </CardDescription>
                      </CardHeader>
                      <CardContent className="p-6 text-center">
                          <div className="mb-4">
-                             <p className="text-sm text-gray-500 uppercase tracking-wider">Total Tons Sold</p>
+                             <p className="text-sm text-gray-500 uppercase tracking-wider">Total Tons Sold (All Stores)</p>
                              <p className="text-5xl font-bold text-[var(--gajkesari-dark-red)] my-2">
-                                 {summaryData.totalTons.toFixed(2)}
+                                 {aggregatedTotalTons.toFixed(2)} {/* Display aggregated total */}
                              </p>
-                         </div>
-                         <div className="flex items-center justify-center space-x-2 text-gray-600">
-                            <User className="w-4 h-4" />
-                            <span>Last Sale By: {summaryData.employeeName || 'N/A'}</span>
                          </div>
                      </CardContent>
                  </Card>
@@ -340,7 +361,7 @@ const TotalSalesReportComponent: React.FC = () => {
             <Card className="h-full shadow-md">
                 <CardHeader>
                     <CardTitle>Total Sales Bar Chart</CardTitle>
-                    <CardDescription>Total tonnage for the selected store and period.</CardDescription>
+                    <CardDescription>Total tonnage across all stores for the selected period.</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[300px] p-4">
                     <Bar options={chartOptions} data={chartDisplayData} />

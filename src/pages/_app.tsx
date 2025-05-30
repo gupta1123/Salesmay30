@@ -342,9 +342,35 @@ const AppContent = ({
   pageProps: AppPropsWithLayout['pageProps']; 
   getLayout: (page: React.ReactElement) => React.ReactNode;
 }) => {
+  const dispatch = useDispatch<AppDispatch>();
   const token = useSelector((state: RootState) => state.auth.token);
-  const isValidToken = token && isTokenValid(token);
+  const [isInitialized, setIsInitialized] = useState(false);
   const [showSplash, setShowSplash] = useState(false);
+
+  // Check for stored token on initialization
+  useEffect(() => {
+    const storedToken = localStorage.getItem('token');
+    const storedRole = localStorage.getItem('role');
+    const storedUsername = localStorage.getItem('username');
+
+    if (storedToken && isTokenValid(storedToken)) {
+      // Restore token to Redux state
+      dispatch(setToken(storedToken));
+      setupAxiosDefaults(storedToken);
+      
+      if (storedRole) {
+        dispatch(setRole(storedRole as RootState['auth']['role']));
+      }
+      
+      if (storedUsername) {
+        dispatch(fetchUserInfo(storedUsername));
+      }
+    }
+    
+    setIsInitialized(true);
+  }, [dispatch]);
+
+  const isValidToken = token && isTokenValid(token);
 
   useEffect(() => {
     if (isValidToken) {
@@ -355,6 +381,11 @@ const AppContent = ({
       return () => clearTimeout(timer);
     }
   }, [isValidToken]);
+
+  // Show loading state during initialization
+  if (!isInitialized) {
+    return <SplashScreen />;
+  }
 
   if (!isValidToken) {
     return <LoginPage />;
@@ -429,40 +460,6 @@ const AuthWrapper = ({ children }: { children: ReactNode }) => {
       axios.interceptors.response.eject(interceptor);
     };
   }, []);
-
-  // Initial auth check on mount and route change
-  useEffect(() => {
-    const storedToken = localStorage.getItem('token');
-    const storedRole = localStorage.getItem('role');
-    const storedUsername = localStorage.getItem('username');
-
-    if (storedToken) {
-      if (isTokenValid(storedToken)) {
-        if (!token) {
-          dispatch(setToken(storedToken));
-          setupAxiosDefaults(storedToken);
-        }
-      } else {
-        clearAuthAndRedirect();
-        return;
-      }
-    }
-
-    if (storedRole && !role) {
-      dispatch(setRole(storedRole as RootState['auth']['role']));
-    }
-
-    if (storedUsername && !username) {
-      dispatch(fetchUserInfo(storedUsername));
-    }
-  }, [dispatch, token, role, username, router.pathname]);
-
-  // Protect routes
-  useEffect(() => {
-    if (!token && router.pathname !== '/') {
-      router.push('/');
-    }
-  }, [token, router.pathname]);
 
   return <>{children}</>;
 };

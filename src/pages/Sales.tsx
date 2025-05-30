@@ -96,13 +96,15 @@ interface SalesRecord {
   date: string; // Add date field (assuming API returns string)
 }
 
-// Interface for the sales summary data
+// Interface for the sales summary data - now includes city/state
 interface SummaryData {
   employeeId: number;
   employeeName: string;
   totalTons: number;
   storeId: number;
   storeName: string;
+  storeCity?: string; // Add city
+  storeState?: string; // Add state
 }
 
 const Sales: React.FC = () => {
@@ -119,25 +121,26 @@ const Sales: React.FC = () => {
   const [salesRecords, setSalesRecords] = useState<SalesRecord[]>([]); // State for table data
   const [activeTab, setActiveTab] = useState("records"); // State for active tab
 
-  // State for Records Tab Search Filters
-  const [searchStoreName, setSearchStoreName] = useState('');
-  const [searchOfficerName, setSearchOfficerName] = useState('');
-  const [searchCity, setSearchCity] = useState('');
-  const [searchState, setSearchState] = useState('');
+  // State for Records Tab Search Filters - Consolidated
+  const [recordsFilters, setRecordsFilters] = useState({
+      storeName: '',
+      employeeName: '',
+      city: '',
+      state: '',
+  });
 
   // State for Records Tab Pagination
-  const [recordsCurrentPage, setRecordsCurrentPage] = useState(1);
-  const recordsItemsPerPage = 15;
+  const [recordsCurrentPage, setRecordsCurrentPage] = useState(1); // Current page (1-indexed UI)
+  const [recordsTotalPages, setRecordsTotalPages] = useState(0); // Total pages from API
+  const [recordsTotalElements, setRecordsTotalElements] = useState(0); // Total elements from API
+  const recordsItemsPerPage = 15; // Keep this for page size request
 
   // State for Summary Tab
-  const [summaryStoreId, setSummaryStoreId] = useState<string>('');
   const [summaryStartDate, setSummaryStartDate] = useState<Date | undefined>(subDays(new Date(), 7));
   const [summaryEndDate, setSummaryEndDate] = useState<Date | undefined>(new Date());
-  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
+  const [summaryData, setSummaryData] = useState<SummaryData[] | null>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState<boolean>(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  // State to hold city/state for the summary table
-  const [summaryStoreDetails, setSummaryStoreDetails] = useState<Pick<StoreDetails, 'city' | 'state'> | null>(null);
 
   const [newSaleData, setNewSaleData] = useState<SaleData>({
     storeId: '',
@@ -226,45 +229,83 @@ const Sales: React.FC = () => {
     }
   };
 
-  // Fetch Sales Records for the Table
-  const fetchSalesRecords = useCallback(async () => {
+  // Fetch Sales Records for the Table (Now Paginated)
+  const fetchSalesRecords = useCallback(async (page: number) => { // page is 0-indexed
     if (!token) return;
     setIsLoadingSales(true);
     setFetchError(null);
+
+    // Construct query parameters using recordsFilters state
+    const params = new URLSearchParams();
+    params.append('page', page.toString());
+    params.append('size', recordsItemsPerPage.toString());
+
+    // Define mapping from frontend filter keys to backend param names
+    const filterParamMapping: { [key: string]: string } = {
+        storeName: 'storeName',
+        employeeName: 'employeeName',
+        city: 'city',
+        state: 'state'
+    };
+
+    // Iterate over filters and append if value exists
+    Object.entries(recordsFilters).forEach(([key, value]) => {
+        if (value && filterParamMapping[key]) {
+            params.append(filterParamMapping[key], value);
+        }
+    });
+
+    const url = `https://api.gajkesaristeels.in/sales/getFilteredSales?${params.toString()}`;
+
     try {
-      // Use the confirmed endpoint to fetch sales data
-      const response = await fetch('https://api.gajkesaristeels.in/sales/getAll', {
+      const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const data: any[] = await response.json(); // Fetch as any[] initially for mapping
 
-      // Map the API response fields to the SalesRecord interface fields
-      // Assuming the API response for each sale includes a 'date' field (e.g., item.date or item.createdAt)
-      // *** Adjust 'item.date' below if the actual field name is different ***
-      const mappedData: SalesRecord[] = data.map(item => ({
+      if (!response.ok) {
+         // Attempt to parse error message
+        let errorMsg = `HTTP error! status: ${response.status}`;
+        try {
+            const errorData = await response.json();
+            errorMsg = errorData.message || `Failed to load page ${page + 1}.`;
+        } catch (e) { /* Ignore if response is not JSON */}
+        throw new Error(errorMsg);
+      }
+
+      const data = await response.json();
+
+      // Map the API response fields from the 'content' array
+      const mappedData: SalesRecord[] = data.content.map((item: any) => ({
         id: item.id,
         storeName: item.storeName,
         employeeName: item.employeeName,
-        city: item.storeCity, // Map storeCity to city
-        state: item.storeState, // Map storeState to state
+        city: item.storeCity,
+        state: item.storeState,
         tons: item.tons,
-        date: item.date || item.createdAt || new Date().toISOString(), // Map date field - **ADJUST AS NEEDED**
+        date: item.createdAt, // Use createdAt field from API response
       }));
 
-      // Sort by date descending (latest first) before setting state
-      const sortedData = mappedData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setSalesRecords(mappedData); // Set only the current page's data
+      setRecordsCurrentPage(data.number + 1); // Update current page (API is 0-indexed)
+      setRecordsTotalPages(data.totalPages);
+      setRecordsTotalElements(data.totalElements);
 
-      setSalesRecords(sortedData); // Set the sorted and mapped data
-      setRecordsCurrentPage(1); // Reset to first page after fetching/filtering
-    } catch (error: any) {
+    } catch (error: any) { // Catch block needs type assertion or check
       console.error('Error fetching sales records:', error);
-      setFetchError('Failed to load sales records. Please refresh the page.');
+      // Use type assertion or check
+      const errorMessage = (error instanceof Error) ? error.message : 'Failed to load sales records. Please refresh the page.';
+      setFetchError(errorMessage);
       setSalesRecords([]); // Clear data on error
+      setRecordsTotalPages(0);
+      setRecordsTotalElements(0);
     } finally {
       setIsLoadingSales(false);
     }
-  }, [token]);
+  }, [
+      token,
+      recordsItemsPerPage,
+      recordsFilters, // Depend on the entire filters object
+  ]);
 
   // Fetch data when the modal is opened
   useEffect(() => {
@@ -278,11 +319,29 @@ const Sales: React.FC = () => {
     }
   }, [isModalOpen, fetchStores, fetchFieldOfficers]);
 
-  // Fetch sales records on initial component mount
+  // Debounced fetch for sales records when page or filters change
   useEffect(() => {
-    fetchSalesRecords();
-    fetchStores(); // Ensure stores are fetched on mount for the summary dropdown
-  }, [fetchSalesRecords, fetchStores]);
+    // Set up a timer to fetch data after a delay
+    const handler = setTimeout(() => {
+      // Fetch using the current page (adjusted for 0-indexing)
+      // fetchSalesRecords uses the latest recordsFilters state internally
+      fetchSalesRecords(recordsCurrentPage - 1);
+    }, 500); // 500ms debounce delay
+
+    // Cleanup function to clear the timeout if dependencies change before delay finishes
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [
+      recordsFilters,     // Re-run effect when filters change
+      recordsCurrentPage, // Re-run effect when page changes
+      fetchSalesRecords,  // Include fetch function for its dependencies (like token)
+  ]);
+
+   // Fetch stores only on mount
+   useEffect(() => {
+     fetchStores();
+   }, [fetchStores]);
 
   const handleInputChange = (field: keyof SaleData, value: any) => {
     setNewSaleData(prev => ({ ...prev, [field]: value }));
@@ -338,7 +397,7 @@ const Sales: React.FC = () => {
         }
 
         console.log("Sale created successfully:", responseBody);
-        fetchSalesRecords(); // Re-fetch sales records after creation
+        fetchSalesRecords(0); // Re-fetch sales records after creation
         setNewSaleData({ storeId: '', fieldOfficerId: '', tons: '', date: undefined }); // Reset form
         setIsModalOpen(false); // Close modal
 
@@ -350,9 +409,9 @@ const Sales: React.FC = () => {
     }
   };
 
-  // Fetch Sales Summary Data
-  const fetchSalesSummary = async (storeId: string, startDate: Date, endDate: Date) => {
-    if (!token || !storeId || !startDate || !endDate) return;
+  // Fetch Sales Summary Data - No longer takes storeId
+  const fetchSalesSummary = async (startDate: Date, endDate: Date) => {
+    if (!token || !startDate || !endDate) return;
     setIsSummaryLoading(true);
     setSummaryError(null);
     setSummaryData(null);
@@ -360,51 +419,44 @@ const Sales: React.FC = () => {
     const formattedStartDate = format(startDate, 'yyyy-MM-dd');
     const formattedEndDate = format(endDate, 'yyyy-MM-dd');
 
+    // Construct query parameters for the endpoint (without storeId)
+    const params = new URLSearchParams();
+    params.append('startDate', formattedStartDate);
+    params.append('endDate', formattedEndDate);
+    // params.append('storeId', storeId); // Removed storeId
+    params.append('page', '0'); // Request first page (adjust if API supports fetching all pages)
+    params.append('size', '100'); // Request a larger size (adjust as needed or implement pagination)
+
+    const url = `https://api.gajkesaristeels.in/sales/totalTons?${params.toString()}`;
+
     try {
-      const url = `https://api.gajkesaristeels.in/sales/totalTonsByStore?storeId=${storeId}&startDate=${formattedStartDate}&endDate=${formattedEndDate}`;
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!response.ok) {
-        // Attempt to parse error message from response body
         let errorMsg = `HTTP error! status: ${response.status}`;
         try {
            const errorData = await response.json();
            errorMsg = errorData.message || errorMsg;
-        } catch (e) { /* Ignore if response is not JSON */}
+        } catch (e) { /* Ignore */ }
         throw new Error(errorMsg);
       }
 
-      const data: SummaryData = await response.json();
-      setSummaryData(data);
+      const data = await response.json();
 
-      // --- Fetch store details (city/state) for the summary table --- START
-      setSummaryStoreDetails(null); // Clear previous details first
-      if (data.storeId) { // Only fetch if we have a storeId from summary
-        try {
-            const storeDetailsResponse = await fetch(`https://api.gajkesaristeels.in/store/getById?id=${data.storeId}`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!storeDetailsResponse.ok) {
-                console.warn(`Could not fetch store details for ID ${data.storeId} for summary.`);
-                // Keep summaryStoreDetails as null
-            } else {
-                const storeDetails: StoreDetails = await storeDetailsResponse.json();
-                setSummaryStoreDetails({ city: storeDetails.city, state: storeDetails.state });
-            }
-        } catch (storeError) {
-            console.error('Error fetching store details for summary:', storeError);
-            // Keep summaryStoreDetails as null
-        }
+      // Check if content exists
+      if (data.content) {
+          // The response content is already an array of SummaryData objects (based on API structure)
+          setSummaryData(data.content);
+      } else {
+          setSummaryData([]); // Set empty array if no content
       }
-       // --- Fetch store details (city/state) for the summary table --- END
 
     } catch (error: any) {
       console.error('Error fetching sales summary:', error);
       setSummaryError(error.message || 'Failed to load sales summary.');
       setSummaryData(null); // Ensure summary data is cleared on error
-      setSummaryStoreDetails(null); // Clear store details on error too
     } finally {
       setIsSummaryLoading(false);
     }
@@ -422,45 +474,30 @@ const Sales: React.FC = () => {
 
   // Handler for applying summary filters
   const handleApplySummaryFilters = () => {
-    if (summaryStoreId && summaryStartDate && summaryEndDate) {
-      fetchSalesSummary(summaryStoreId, summaryStartDate, summaryEndDate);
+    if (summaryStartDate && summaryEndDate) {
+      // Pass only dates to fetchSalesSummary
+      fetchSalesSummary(summaryStartDate, summaryEndDate);
     } else {
-      setSummaryError("Please select a store, start date, and end date.");
+      setSummaryError("Please select a start date and end date.");
       setSummaryData(null); // Clear previous data if filters are invalid
     }
   };
 
   // Handler for clearing summary filters
   const handleClearSummaryFilters = () => {
-    setSummaryStoreId('');
+    // setSummaryStoreId(''); // Removed
     setSummaryStartDate(subDays(new Date(), 7)); // Reset to default date range
     setSummaryEndDate(new Date());
     setSummaryData(null); // Clear the summary data
-    setSummaryStoreDetails(null); // Clear the store details
     setSummaryError(null); // Clear any summary errors
   };
 
-  // Filtered and Paginated Sales Records
-  const filteredSalesRecords = useMemo(() => {
-    return salesRecords.filter(sale =>
-      sale.storeName.toLowerCase().includes(searchStoreName.toLowerCase()) &&
-      sale.employeeName.toLowerCase().includes(searchOfficerName.toLowerCase()) &&
-      (sale.city || '').toLowerCase().includes(searchCity.toLowerCase()) &&
-      (sale.state || '').toLowerCase().includes(searchState.toLowerCase()) &&
-      true // Removed date filtering condition
-    );
-  }, [salesRecords, searchStoreName, searchOfficerName, searchCity, searchState]);
-
-  // Handler for records page change
+  // Handler for records page change - just update the state
   const handleRecordsPageChange = (page: number) => {
-    setRecordsCurrentPage(page);
+    if (page !== recordsCurrentPage) {
+        setRecordsCurrentPage(page);
+    }
   };
-
-  // Calculate pagination for records tab based on filtered data
-  const recordsTotalPages = Math.ceil(filteredSalesRecords.length / recordsItemsPerPage);
-  const recordsStartIndex = (recordsCurrentPage - 1) * recordsItemsPerPage;
-  const recordsEndIndex = recordsStartIndex + recordsItemsPerPage;
-  const currentSalesRecords = filteredSalesRecords.slice(recordsStartIndex, recordsEndIndex);
 
   // Function to render pagination controls (can be reused or adapted)
   const renderRecordsPagination = () => {
@@ -710,32 +747,44 @@ const Sales: React.FC = () => {
                                           <TableCell className="p-1">
                                               <Input
                                                   placeholder="Search Store..."
-                                                  value={searchStoreName}
-                                                  onChange={(e) => { setSearchStoreName(e.target.value); setRecordsCurrentPage(1); }}
+                                                  value={recordsFilters.storeName}
+                                                  onChange={(e) => {
+                                                      setRecordsFilters(prev => ({ ...prev, storeName: e.target.value }));
+                                                      setRecordsCurrentPage(1);
+                                                  }}
                                                   className="h-8"
                                               />
                                           </TableCell>
                                           <TableCell className="p-1">
                                               <Input
                                                   placeholder="Search Officer..."
-                                                  value={searchOfficerName}
-                                                  onChange={(e) => { setSearchOfficerName(e.target.value); setRecordsCurrentPage(1); }}
+                                                  value={recordsFilters.employeeName}
+                                                  onChange={(e) => {
+                                                      setRecordsFilters(prev => ({ ...prev, employeeName: e.target.value }));
+                                                      setRecordsCurrentPage(1);
+                                                  }}
                                                   className="h-8"
                                               />
                                           </TableCell>
                                           <TableCell className="p-1">
                                               <Input
                                                   placeholder="Search City..."
-                                                  value={searchCity}
-                                                  onChange={(e) => { setSearchCity(e.target.value); setRecordsCurrentPage(1); }}
+                                                  value={recordsFilters.city}
+                                                  onChange={(e) => {
+                                                      setRecordsFilters(prev => ({ ...prev, city: e.target.value }));
+                                                      setRecordsCurrentPage(1);
+                                                  }}
                                                   className="h-8"
                                               />
                                           </TableCell>
                                           <TableCell className="p-1">
                                               <Input
                                                   placeholder="Search State..."
-                                                  value={searchState}
-                                                  onChange={(e) => { setSearchState(e.target.value); setRecordsCurrentPage(1); }}
+                                                  value={recordsFilters.state}
+                                                  onChange={(e) => {
+                                                      setRecordsFilters(prev => ({ ...prev, state: e.target.value }));
+                                                      setRecordsCurrentPage(1);
+                                                  }}
                                                   className="h-8"
                                               />
                                           </TableCell>
@@ -744,16 +793,16 @@ const Sales: React.FC = () => {
                                       </TableRow>
                                   </TableHeader>
                                   <TableBody>
-                                      {currentSalesRecords.length > 0 ? (
-                                          currentSalesRecords.map((sale) => (
-                                              <TableRow key={sale.id}>
-                                                  <TableCell className="font-medium">{sale.storeName}</TableCell>
-                                                  <TableCell>{sale.employeeName}</TableCell>
-                                                  <TableCell>{sale.city || 'N/A'}</TableCell>
-                                                  <TableCell>{sale.state || 'N/A'}</TableCell>
+                                      {salesRecords.length > 0 ? (
+                                          salesRecords.map((sale) => (
+                                          <TableRow key={sale.id}>
+                                              <TableCell className="font-medium">{sale.storeName}</TableCell>
+                                              <TableCell>{sale.employeeName}</TableCell>
+                                              <TableCell>{sale.city || 'N/A'}</TableCell>
+                                              <TableCell>{sale.state || 'N/A'}</TableCell>
                                                   <TableCell className="pr-4">{sale.date ? format(new Date(sale.date), "dd MMM ''yy") : 'N/A'}</TableCell>
-                                                  <TableCell className="text-right">{sale.tons.toFixed(2)}</TableCell>
-                                              </TableRow>
+                                              <TableCell className="text-right">{sale.tons.toFixed(2)}</TableCell>
+                                          </TableRow>
                                           ))
                                       ) : (
                                           <TableRow>
@@ -766,8 +815,8 @@ const Sales: React.FC = () => {
                               </Table>
                           </div>
                       )}
-                      {/* Pagination Controls - Show based on filtered results */}
-                      {(filteredSalesRecords.length > recordsItemsPerPage) && (
+                      {/* Pagination Controls - Show based on total pages from API */}
+                      {(recordsTotalPages > 1) && (
                          <div className="mt-8 flex justify-center">
                              {renderRecordsPagination()}
                          </div>
@@ -779,7 +828,8 @@ const Sales: React.FC = () => {
               {/* Filters for Sales Summary */}
               <div className="mt-4 p-4 border rounded-md mb-6 bg-gradient-to-b from-[var(--gajkesari-black)] to-[var(--gajkesari-gray)]">
                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                    {/* Store Filter */} 
+                    {/* Store Filter - Removed */}
+                    {/*
                     <div className="space-y-1">
                        <Label htmlFor="summaryStoreId" className="text-gray-200">Store</Label>
                        <Select value={summaryStoreId} onValueChange={setSummaryStoreId}>
@@ -795,8 +845,9 @@ const Sales: React.FC = () => {
                            </SelectContent>
                        </Select>
                     </div>
-                    {/* Start Date Filter */} 
-                    <div className="space-y-1">
+                    */}
+                    {/* Start Date Filter */}
+                    <div className="space-y-1 md:col-start-1"> {/* Adjust grid positioning */}
                         <Label htmlFor="summaryStartDate" className="text-gray-200">Start Date</Label>
                         <Popover>
                             <PopoverTrigger asChild>
@@ -821,7 +872,7 @@ const Sales: React.FC = () => {
                             </PopoverContent>
                         </Popover>
                     </div>
-                    {/* End Date Filter */} 
+                    {/* End Date Filter */}
                     <div className="space-y-1">
                         <Label htmlFor="summaryEndDate" className="text-gray-200">End Date</Label>
                         <Popover>
@@ -851,7 +902,7 @@ const Sales: React.FC = () => {
                     <div className="flex flex-col sm:flex-row gap-2 md:col-span-1">
                        <Button
                            onClick={handleApplySummaryFilters}
-                           disabled={isSummaryLoading || !summaryStoreId || !summaryStartDate || !summaryEndDate}
+                           disabled={isSummaryLoading || !summaryStartDate || !summaryEndDate} // Removed storeId check
                            className="w-full"
                        >
                            {isSummaryLoading ? <Loader className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -880,45 +931,55 @@ const Sales: React.FC = () => {
                          <p className="text-lg font-semibold">Error Loading Summary</p>
                          <p>{summaryError}</p>
                      </div>
-                 ) : summaryData ? (
+                 ) : summaryData && summaryData.length > 0 ? ( // Check if array has data
                      // Display the summary data in a table
-                     <div className="w-full overflow-x-auto">
-                         <Table>
+                        <div className="w-full overflow-x-auto">
+                            <Table>
                              <TableCaption>Sales summary for the selected period.</TableCaption>
-                             <TableHeader>
-                                 <TableRow>
-                                     <TableHead>Store Name</TableHead>
-                                     <TableHead>City</TableHead>
-                                     <TableHead>State</TableHead>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Store Name</TableHead>
+                                        <TableHead>City</TableHead>
+                                        <TableHead>State</TableHead>
                                      <TableHead>Last Sale By</TableHead>
-                                     <TableHead>Date Range</TableHead>
+                                     {/* Date Range is implicit from filters, removed from table */}
+                                     {/* <TableHead>Date Range</TableHead> */}
                                      <TableHead className="text-right">Total Tons</TableHead>
-                                 </TableRow>
-                             </TableHeader>
-                             <TableBody>
-                                 <TableRow>
-                                     <TableCell className="font-medium">{summaryData.storeName}</TableCell>
-                                     <TableCell>{summaryStoreDetails?.city || 'N/A'}</TableCell>
-                                     <TableCell>{summaryStoreDetails?.state || 'N/A'}</TableCell>
-                                     <TableCell>{summaryData.employeeName || 'N/A'}</TableCell>
-                                     <TableCell>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                {/* Map over the summaryData array */} 
+                                {summaryData.map((summaryItem) => (
+                                    <TableRow key={summaryItem.storeId}> {/* Use storeId as key */} 
+                                        <TableCell className="font-medium">{summaryItem.storeName}</TableCell>
+                                        <TableCell>{summaryItem.storeCity || 'N/A'}</TableCell>
+                                        <TableCell>{summaryItem.storeState || 'N/A'}</TableCell>
+                                        <TableCell>{summaryItem.employeeName || 'N/A'}</TableCell>
+                                        {/* 
+                                        <TableCell>
                                          {summaryStartDate ? format(summaryStartDate, "dd MMM ''yy") : ''}
                                          {' - '}
                                          {summaryEndDate ? format(summaryEndDate, "dd MMM ''yy") : ''}
-                                     </TableCell>
-                                     <TableCell className="text-right">{summaryData.totalTons.toFixed(2)}</TableCell>
-                                 </TableRow>
-                             </TableBody>
-                         </Table>
-                     </div>
+                                        </TableCell>
+                                        */}
+                                        <TableCell className="text-right">{summaryItem.totalTons.toFixed(2)}</TableCell>
+                                    </TableRow>
+                                ))}
+                                </TableBody>
+                            </Table>
+                        </div>
                  ) : (
-                    // Show message to apply filters instead of the old table
+                    // Show message to apply filters or if no data returned
                     <div className="text-center py-10 text-gray-500">
-                         <p className="text-lg font-semibold">Apply Filters for Summary</p>
-                         <p className="mt-2">Select a store and date range to view the sales summary.</p>
+                         <p className="text-lg font-semibold">
+                            {summaryData === null ? "Apply Filters for Summary" : "No Summary Data Found"}
+                         </p>
+                         <p className="mt-2">
+                            {summaryData === null ? "Select a date range to view the sales summary." : "No sales summary data available for the selected date range."}
+                         </p>
                     </div>
-                 )}
-            </div>
+          )}
+      </div>
           </TabsContent>
         </Tabs>
     </div>

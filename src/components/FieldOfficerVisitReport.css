@@ -1,0 +1,35 @@
+body { font-family: sans-serif; padding: 1rem; }
+.controls { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+.controls label { margin-right: 0.25rem; }
+.fo-button { padding: 0.4rem 0.8rem; cursor: pointer; background-color: black; color: white; border-radius: 0.25rem; }
+.fo-button:hover { background-color: #2d3748; }
+
+table.fo-table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+.fo-table th, .fo-table td { border: 1px solid #ccc; padding: 0.5rem; text-align: center; }
+.fo-table th { background: #f4f4f4; }
+.fo-table th.clickable { cursor: pointer; color: #007bff; }
+.fo-table th.clickable:hover { text-decoration: underline; }
+.hidden { display: none; }
+
+.fo-customer-type-link {
+    background: none;
+    border: none;
+    color: black;
+    text-decoration: none;
+    cursor: pointer;
+    padding: 0;
+    font-weight: inherit;
+    font-size: inherit;
+}
+
+.fo-customer-type-link:hover,
+.fo-customer-type-link:focus {
+    text-decoration: underline;
+    outline: none;
+}
+
+.fo-customer-type-link:disabled {
+    color: #a0aec0;
+    cursor: not-allowed;
+    text-decoration: none;
+} 

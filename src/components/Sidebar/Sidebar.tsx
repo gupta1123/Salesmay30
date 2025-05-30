@@ -4,7 +4,7 @@ import { useRouter } from 'next/router';
 import styles from './Sidebar.module.css';
 import { useDispatch, useSelector } from 'react-redux';
 import { logoutUser, resetState, AppDispatch, RootState } from '../../store';
-import { FiLogOut, FiHome, FiUsers, FiMap, FiUser, FiClipboard, FiDollarSign, FiSettings, FiBarChart2, FiMenu, FiX } from 'react-icons/fi';
+import { FiLogOut, FiHome, FiUsers, FiMap, FiUser, FiClipboard, FiDollarSign, FiSettings, FiBarChart2, FiMenu, FiX, FiHelpCircle } from 'react-icons/fi';
 import { GiSteelClaws } from 'react-icons/gi';
 import { motion, AnimatePresence, PanInfo } from 'framer-motion';
 
@@ -20,7 +20,7 @@ const sidebarItems = [
   { href: '/CustomerListPage', icon: FiUsers, label: 'Customers', roles: ['ADMIN', 'MANAGER', 'FIELD OFFICER'] },
   { href: '/Employeelist', icon: FiUser, label: 'Employees', roles: ['ADMIN'] },
   { href: '/Settings', icon: FiSettings, label: 'Settings', roles: ['ADMIN'] },
-  { href: '/Sales', icon: FiDollarSign, label: 'Sales', roles: ['ADMIN', 'MANAGER', 'FIELD OFFICER'] },
+  { href: '/Enquiries', icon: FiHelpCircle, label: 'Enquiries', roles: ['ADMIN', 'MANAGER', 'FIELD OFFICER'] },
 ];
 
 const BottomBar: React.FC<{ role: string | null }> = ({ role }) => {

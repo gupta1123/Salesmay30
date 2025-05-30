@@ -1,0 +1,7 @@
+@media (min-width: 1024px) {
+    .container-enquiries {
+        width: 90%;
+        position: relative;
+        left: 190px;
+    }
+} 
