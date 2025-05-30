@@ -1213,7 +1213,7 @@ const Dashboard: React.FC = () => {
               >
                 Total Visits
               </motion.p>
-              <p className="text-white/80 text-sm">Today's Overview</p>
+              <p className="text-white/80 text-sm">Today&apos;s Overview</p>
             </div>
           </div>
 

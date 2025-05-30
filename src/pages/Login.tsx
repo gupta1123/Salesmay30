@@ -200,7 +200,7 @@ const Login = () => {
           animate={{ opacity: 1 }}
           transition={{ delay: 1.1, duration: 0.5 }}
         >
-          Don't have an account? <a href="#">Sign up</a>
+          Don&apos;t have an account? <a href="#">Sign up</a>
         </motion.p>
       </div>
     </div>
